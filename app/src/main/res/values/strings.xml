@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">SpeedyConverter</string>
+    <string name="no_file_selected_title">No file selected</string>
+    <string name="ok_title">OK</string>
+    <string name="cancel_title">Cancel</string>
+    <string name="permission_required_title">Permission required</string>
+    <string name="go_to_settings_title">Go To Settings</string>
+    <string name="allow_all_permissions_at_settings_title">Allow all permissions</string>
+</resources>
