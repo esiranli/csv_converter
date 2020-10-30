@@ -6,4 +6,16 @@
     <string name="permission_required_title">Permission required</string>
     <string name="go_to_settings_title">Go To Settings</string>
     <string name="allow_all_permissions_at_settings_title">Allow all permissions</string>
+    <string name="change_tax_value_button_text">Change Tax Value</string>
+    <string name="import_from_elbepos_title">Import from Elbepos csv</string>
+    <string name="import_from_speedy_title">Import from Speedy csv</string>
+    <string name="inhaus_steuer_hint">Inhaus steuer</string>
+    <string name="ausserhaus_steuer_hint">ausserhaus steuer</string>
+    <string name="inhaus_steuer_hint_old">Old inhaus steuer</string>
+    <string name="inhaus_steuer_hint_new">New inhaus steuer</string>
+    <string name="ausserhaus_steuer_hint_old">Old ausserhaus steuer</string>
+    <string name="ausserhaus_steuer_hint_new">New Ausserhaus steuer</string>
+    <string name="steuersatz_title">Steuersatz (imhaus)</string>
+    <string name="new_value">New value</string>
+    <string name="steuersatz2_title">Steuersatz (ausserhaus)</string>
 </resources>

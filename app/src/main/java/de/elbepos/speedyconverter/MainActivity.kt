@@ -1,11 +1,11 @@
 package de.elbepos.speedyconverter
 
 import android.app.ProgressDialog
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Bundle
-import android.os.Environment
+import android.os.*
 import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
@@ -13,24 +13,27 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.os.HandlerCompat
 import com.opencsv.CSVWriter
 import com.opencsv.bean.CsvBindByName
 import kotlinx.android.synthetic.main.activity_main.*
 import java.io.File
 import java.io.FileReader
 import java.io.FileWriter
+import java.io.IOException
 import java.math.BigDecimal
 import java.math.RoundingMode
-import java.text.DecimalFormat
 import java.text.NumberFormat
 import java.util.*
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import kotlin.collections.ArrayList
-import kotlin.math.pow
 
 class MainActivity : AppCompatActivity() {
 
     companion object {
-        private val SELECT_CSV_FILE_REQUEST_CODE = 1008
+        private val SELECT_ELBEPOS_EXPORT_CSV_FILE_REQUEST_CODE = 1008
+        private val SELECT_SPEEDY_EXPORT_CSV_FILE_REQUEST_CODE = 1010
         private val PERMISSIONS = arrayOf(
             android.Manifest.permission.READ_EXTERNAL_STORAGE,
             android.Manifest.permission.WRITE_EXTERNAL_STORAGE
@@ -51,6 +54,7 @@ class MainActivity : AppCompatActivity() {
             "Verkaufspreis",
             "RabattID",
             "Steuersatz",
+            "Steuersatz2",
             "Pfandpreis",
             "BonDruckJaNein",
             "PfandBonDruckJaNein",
@@ -82,24 +86,64 @@ class MainActivity : AppCompatActivity() {
     }
 
     private var sourceItems = ArrayList<SourceItem>()
-    private var file: File? = null
+    private var targetItems = ArrayList<TargetItem>()
+    private var elbeposExportFile: File? = null
+    private var speedyExportFile: File? = null
     private var progressDialog: ProgressDialog? = null
+
+    private var imhausOldValue1 = 5
+    private var imhausOldValue2 = 16
+    private var ausserhausOldValue1 = 5
+    private var ausserhausOldValue2 = 16
+
+    private var imhausNewValue1 = 0
+    private var imhausNewValue2 = 0
+    private var ausserhausNewValue1 = 0
+    private var ausserhausNewValue2 = 0
+    private var formatter: NumberFormat? = null
+
+    private val executorService: ExecutorService = Executors.newFixedThreadPool(4)
+    private val mainThreadHandler: Handler = HandlerCompat.createAsync(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         requestRuntimePermissions()
+        formatter = getNumberFormat()
 
-        button.setOnClickListener {
-            val intent = Intent(Intent.ACTION_GET_CONTENT)
-            intent.addCategory(Intent.CATEGORY_OPENABLE)
-            intent.type = "*/*"
-            startActivityForResult(
-                Intent.createChooser(intent, "Open CSV"),
-                SELECT_CSV_FILE_REQUEST_CODE
-            )
+        button_import_csv.setOnClickListener {
+            openFile("Open CSV", SELECT_ELBEPOS_EXPORT_CSV_FILE_REQUEST_CODE)
         }
+        button_import_csv_speedy.setOnClickListener {
+            try {
+                ausserhausNewValue1 = editTextNumberAusserhausNewValue1.text.toString().toInt()
+                ausserhausNewValue2 = editTextNumberAusserhausNewValue2.text.toString().toInt()
+                ausserhausOldValue1 = editTextNumberAusserhausOldValue1.text.toString().toInt()
+                ausserhausOldValue2 = editTextNumberAusserhausOldValue2.text.toString().toInt()
+                imhausNewValue1 = editTextNumberImhausNewValue1.text.toString().toInt()
+                imhausNewValue2 = editTextNumberImhausNewValue2.text.toString().toInt()
+                imhausOldValue1 = editTextNumberImhausOldValue1.text.toString().toInt()
+                imhausOldValue2 = editTextNumberImhausOldValue2.text.toString().toInt()
+                openFile("Select Artikellen.csv file to change", SELECT_SPEEDY_EXPORT_CSV_FILE_REQUEST_CODE)
+            } catch (e: NumberFormatException) {
+                Toast.makeText(this, e.message, Toast.LENGTH_SHORT).show()
+            }
+        }
+        editTextNumberAusserhausOldValue1.setText(ausserhausOldValue1.toString())
+        editTextNumberAusserhausOldValue2.setText(ausserhausOldValue2.toString())
+        editTextNumberImhausOldValue1.setText(imhausOldValue1.toString())
+        editTextNumberImhausOldValue2.setText(imhausOldValue2.toString())
+    }
+
+    private fun openFile(title: String, requestCode: Int) {
+        val intent = Intent(Intent.ACTION_GET_CONTENT)
+        intent.addCategory(Intent.CATEGORY_OPENABLE)
+        intent.type = "*/*"
+        startActivityForResult(
+            Intent.createChooser(intent, title),
+            requestCode
+        )
     }
 
     private fun requestRuntimePermissions() {
@@ -184,29 +228,213 @@ class MainActivity : AppCompatActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         when (requestCode) {
-            SELECT_CSV_FILE_REQUEST_CODE -> {
+            SELECT_ELBEPOS_EXPORT_CSV_FILE_REQUEST_CODE -> {
                 if (resultCode == RESULT_OK) {
                     if (data?.data != null) {
-                        file = de.elbepos.speedyconverter.FileUtils.getFile(this, data.data)
-                        fileTextView.text = file?.name
+                        elbeposExportFile = de.elbepos.speedyconverter.FileUtils.getFile(this, data.data)
+                        fileTextView.text = elbeposExportFile?.name
 
                         showLoading()
-                        if (readData()) {
-                            writeCategoryCSV()
-                            writeItemCSV()
+                        executorService.execute {
+                            if (readData()) {
+                                writeCategoryCSV()
+                                writeItemCSV()
+                            }
+                            mainThreadHandler.post {
+                                hideLoading()
+                                Toast.makeText(
+                                    this,
+                                    "CSV files successfully created under csv folder at internal storage",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+
+                            }
                         }
-                        hideLoading()
-                        Toast.makeText(
-                            this,
-                            "CSV files successfully created under csv folder at internal storage",
-                            Toast.LENGTH_SHORT
-                        ).show()
                     } else {
                         fileTextView.text = getString(R.string.no_file_selected_title)
                     }
                 }
             }
+            SELECT_SPEEDY_EXPORT_CSV_FILE_REQUEST_CODE -> {
+                if (resultCode == RESULT_OK && data?.data != null) {
+                    try {
+                        speedyExportFile = de.elbepos.speedyconverter.FileUtils.getFile(this, data.data)
+                        fileTextViewSpeedy.text = speedyExportFile?.name ?: getString(R.string.no_file_selected_title)
+                        if (speedyExportFile?.exists() == true) {
+//                            showLoading()
+                            val task = MyAsyncTask(
+                                before = { showLoading() },
+                                handler = { myTask() },
+                                after = {
+                                    hideLoading()
+                                    Toast.makeText(this, "Successfully converted tax values", Toast.LENGTH_SHORT).show()
+                                }
+                            )
+                            task.execute()
+
+//                            executorService.execute {
+//                                val lines = readSpeedyData()
+//                                if (lines.isNotEmpty()) {
+//                                    writeCSV(ARTIKEL_CSV_FILE_NAME, lines)
+//                                    mainThreadHandler.post {
+//                                        hideLoading()
+//                                        Toast.makeText(this, "Successfully converted tax values", Toast.LENGTH_SHORT).show()
+//                                    }
+//                                } else {
+//                                    mainThreadHandler.post {
+//                                        hideLoading()
+//                                        Toast.makeText(this, "Error occured", Toast.LENGTH_SHORT).show()
+//                                    }
+//                                }
+//
+//                            }
+                        }
+                    } catch (e: Exception) {
+                        Toast.makeText(this, e.message, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
         }
+    }
+
+    private fun myTask() {
+        val lines = readSpeedyData()
+        writeCSV(ARTIKEL_CSV_FILE_NAME, lines)
+    }
+
+    private fun readSpeedyData(): MutableList<Array<String>> {
+        try {
+            val lines = mutableListOf<Array<String>>(ARTIKEL_HEADER)
+            val reader = FileReader(speedyExportFile).buffered()
+            val iterator = reader.lineSequence().iterator()
+            while (iterator.hasNext()) {
+                val line = iterator.next()
+                val tokens = line.split(";").toMutableList()
+                if (tokens[ARTIKEL_HEADER.indexOf("ArtikelID")] != "ArtikelID") {
+                    val newImhausVat = when (tokens[13]) {
+                        imhausOldValue1.toString() -> imhausNewValue1.toString()
+                        imhausOldValue2.toString() -> imhausNewValue2.toString()
+                        else -> tokens[13]
+                    }
+                    val newAusserhausVat = when (tokens[14]) {
+                        ausserhausOldValue1.toString() -> ausserhausNewValue1.toString()
+                        ausserhausOldValue2.toString() -> ausserhausNewValue2.toString()
+                        else -> tokens[14]
+                    }
+                    val idIndex = ARTIKEL_HEADER.indexOf("ArtikelID")
+                    val numberIndex = ARTIKEL_HEADER.indexOf("Artikelnummer")
+                    val nameIndex = ARTIKEL_HEADER.indexOf("ArtikelTextKurz")
+                    val categoryIdIndex = ARTIKEL_HEADER.indexOf("ArtikelGruppenID")
+                    val sortIndexIndex = ARTIKEL_HEADER.indexOf("SortierIndex")
+                    val salePriceIndex = ARTIKEL_HEADER.indexOf("Verkaufspreis")
+                    val depositPriceIndex = ARTIKEL_HEADER.indexOf("Pfandpreis")
+                    val linedItem = TargetItem(
+                        id = tokens[idIndex],
+                        number = tokens[numberIndex],
+                        name = tokens[nameIndex],
+                        categoryId = tokens[categoryIdIndex],
+                        sortIndex = tokens[sortIndexIndex].toInt(),
+                        salePrice = formatter!!.format(tokens[salePriceIndex].toDouble() ?: 0.00),
+                        vat = newImhausVat,
+                        vat2 = newAusserhausVat,
+                        depositPrice = formatter!!.format(tokens[depositPriceIndex].toDouble())
+                    ).toLine()
+                    lines.add(linedItem)
+                }
+            }
+            reader.close()
+            return lines
+        } catch (e: IOException) {
+            Log.e("MainActivity", e.message)
+            return mutableListOf<Array<String>>()
+        }
+    }
+
+//    private fun writeCSV(filename: String, lines: List<Array<String>>): Boolean {
+//        var writer: CSVWriter? = null
+//        try {
+//            val folder =
+//                File(Environment.getExternalStorageDirectory().toString() + "/csv")
+//            folder.mkdirs()
+//            val extStorageDirectory = folder.toString()
+//            val file = File(extStorageDirectory, filename)
+//            if (file.exists()) {
+//                file.createNewFile()
+//            }
+//            val fileWriter = FileWriter(file, false)
+//            writer = CSVWriter(
+//                fileWriter,
+//                ';',
+//                CSVWriter.NO_QUOTE_CHARACTER,
+//                CSVWriter.DEFAULT_ESCAPE_CHARACTER,
+//                CSVWriter.DEFAULT_LINE_END
+//            )
+//            writer.writeAll(lines)
+//        } catch (e: java.lang.Exception) {
+//            hideLoading()
+//            Log.e("MainActivity", e.message)
+//            return false
+//        } finally {
+//            writer?.close()
+//        }
+//        return true
+//    }
+
+//    private class ReadFileTask(val context: Context, val file: File) : AsyncTask<Void, Void, Void>() {
+//        private var progressDialog: ProgressDialog? = null
+//
+//        override fun onPreExecute() {
+//            super.onPreExecute()
+//            showLoading()
+//        }
+//
+//        override fun doInBackground(vararg p0: Void?): Void {
+//            val lines = readSpeedyData()
+//            writeCSV(ARTIKEL_CSV_FILE_NAME, lines)
+//            return Void()
+//        }
+//
+//        private fun showLoading() {
+//            progressDialog = ProgressDialog.show(context, "", "Creating import csv files")
+//        }
+//
+//        private fun hideLoading() {
+//            progressDialog?.dismiss()
+//        }
+//
+//
+//
+//    }
+
+    class MyAsyncTask(
+        val before: (() -> Unit)? = null,
+        val handler: () -> Unit,
+        val after: (() -> Unit)? = null,
+    ) : AsyncTask<Void, Void, Void>() {
+        override fun onPreExecute() {
+            super.onPreExecute()
+            before?.invoke()
+        }
+        override fun doInBackground(vararg params: Void?): Void? {
+            handler()
+            return null
+        }
+
+        override fun onPostExecute(result: Void?) {
+            super.onPostExecute(result)
+            after?.invoke()
+        }
+    }
+
+
+
+    private fun getNumberFormat(): NumberFormat {
+        val numberFormat = NumberFormat.getInstance()
+        numberFormat.minimumFractionDigits = 2
+        numberFormat.maximumFractionDigits = 2
+        val currency = Currency.getInstance("EUR")
+        numberFormat.currency = currency
+        return numberFormat
     }
 
     private fun writeCategoryCSV() {
@@ -251,18 +479,27 @@ class MainActivity : AppCompatActivity() {
         return true
     }
 
+    private fun getCsvFile(filename: String): File {
+        val folder =
+            File(Environment.getExternalStorageDirectory().toString() + "/csv")
+        if (!folder.exists()) {
+            folder.mkdirs()
+        }
+        val extStorageDirectory = folder.toString()
+        return File(extStorageDirectory, filename)
+    }
 
     private fun readData(): Boolean {
         try {
 //            val reader = resources.openRawResource(R.raw.test).reader()
-            if (file != null) {
+            if (elbeposExportFile != null) {
                 sourceItems.clear()
-                val reader = FileReader(file).buffered()
+                val reader = FileReader(elbeposExportFile).buffered()
                 val iterator = reader.lineSequence().iterator()
                 while(iterator.hasNext()) {
                     val line = iterator.next()
                     // do something with line...
-                    val item = lineToData(line)
+                    val item = lineToSourceItem(line)
                     sourceItems.add(item)
                 }
                 reader.close()
@@ -295,15 +532,17 @@ class MainActivity : AppCompatActivity() {
         val targetCategories = getTargetCategories()
         val targetItems = sourceItems.mapIndexed { index, sourceItem ->
             val categoryId = targetCategories.find { it.name == sourceItem.category }?.id ?: ""
+            val vat = sourceItem.getTaxPercentage()
             TargetItem(
                 id = (index).toString(),
                 number = sourceItem.gtin,
-                name = sourceItem.name.replace(",", "."),
+                name = sourceItem.name.replace("\"", ""),
                 categoryId = categoryId,
                 sortIndex = index * 10,
-                salePrice = sourceItem.price_per_unit ?: 0.00,
-                vat = sourceItem.getTaxPercentage(),
-                depositPrice = sourceItem.getDepositPrice()
+                salePrice = formatter!!.format(sourceItem.price_per_unit ?: 0.00),
+                vat = vat,
+                vat2 = vat,
+                depositPrice = formatter!!.format(sourceItem.getDepositPrice())
             )
         }.toMutableList()
         targetItems.removeAt(0)
@@ -312,11 +551,11 @@ class MainActivity : AppCompatActivity() {
 
 
 
-    private fun lineToData(line: String): SourceItem {
+    private fun lineToSourceItem(line: String): SourceItem {
         val tokens = line.split(";")
         return SourceItem(
             type = tokens[0],
-            price_per_unit = tokens[1].toDoubleOrNull(),
+            price_per_unit = tokens[1].replace("\"", "").toDoubleOrNull(),
             gtin = tokens[2],
             name = tokens[3],
             quantity = tokens[4].toDoubleOrNull(),
@@ -328,6 +567,26 @@ class MainActivity : AppCompatActivity() {
             ausser_haus_vat_id = tokens[10].toIntOrNull(),
             pfand_type = tokens[11],
             pfand_bruttopreis = tokens[12].toDoubleOrNull()
+        )
+    }
+
+    private fun lineToTargetItem(line: String): TargetItem {
+        val tokens = line.split(";").toMutableList()
+        val newVat = when (tokens[13]) {
+//            "16" -> inhausVat.toString()
+//            "5" -> ausserhausVat.toString()
+            else -> "0"
+        }
+        return TargetItem(
+            id = tokens[0],
+            number = tokens[2],
+            name = tokens[1],
+            categoryId = tokens[6],
+            sortIndex = tokens[7].toInt(),
+            salePrice = "0.00",
+            vat = newVat,
+            vat2 = newVat,
+            depositPrice = "0.00"
         )
     }
 
@@ -362,8 +621,7 @@ data class SourceItem(
     fun getTaxPercentage(): String {
         return when (vat) {
             "TABAKWAREN", "Getränke", "16", "19" -> "16"
-            "5", "7" -> "5"
-            else -> "0"
+            else -> "5"
         }
     }
 
@@ -387,15 +645,17 @@ data class SourceItem(
 //        "type": "Einwegflaschen und -dosen",
 //        "bruttopreis": 0.25
 //    }
-    fun getDepositPrice(): Double? {
-        if (pfand_type == null) return null
-        return when (pfand_type) {
+    fun getDepositPrice(): Double {
+        var price = 0.00
+        if (pfand_type == null) return price
+        price = when (pfand_type) {
             "Mehrweg-Bierflasche aus Glas" -> 0.08
             "Mehrweg-Bierflasche mit Bügelverschluss" -> 0.15
             "Mehrwegflaschen für Saft oder Softdrinks" -> 0.15
             "Einwegflaschen und -dosen" -> 0.25
-            else -> null
+            else -> 0.00
         }
+        return price
     }
 }
 
@@ -410,11 +670,12 @@ data class TargetItem(
     val sortIndex: Int,
     val quantityMeasure: String = "Stk",
     val quantityNumberAfterDecimalPoint: Int = 0,
-    val unitPrice: Double = 0.00,
-    val salePrice: Double,
+    val unitPrice: String = "0.00",
+    val salePrice: String,
     val discountId: String = "",
     val vat: String,
-    val depositPrice: Double = 0.00,
+    val vat2: String,
+    val depositPrice: String = "0.00",
     val belegReceipt: String = "nein",
     val depositReceipt: String = "nein",
     val status: Int = 0,
@@ -434,9 +695,10 @@ data class TargetItem(
         name: String,
         categoryId: String,
         sortIndex: Int,
-        salePrice: Double,
+        salePrice: String,
         vat: String,
-        depositPrice: Double?
+        vat2: String,
+        depositPrice: String?
     ): this(
         id = id,
         number = number,
@@ -446,7 +708,8 @@ data class TargetItem(
         sortIndex = sortIndex,
         salePrice = salePrice,
         vat = vat,
-        depositPrice = depositPrice ?: 0.00
+        vat2 = vat2,
+        depositPrice = depositPrice ?: "0.00"
     )
 
     fun toLine(): Array<String> {
@@ -461,11 +724,12 @@ data class TargetItem(
             sortIndex.toString(),
             quantityMeasure,
             quantityNumberAfterDecimalPoint.toString(),
-            unitPrice.toFormatted(),
-            salePrice.toFormatted(),
+            unitPrice,
+            salePrice,
             discountId,
             vat,
-            depositPrice.toFormatted(),
+            vat2,
+            depositPrice,
             belegReceipt,
             depositReceipt,
             status.toString(),
@@ -481,16 +745,18 @@ data class TargetItem(
         )
     }
 
-    override fun toString(): String {
-        return arrayOf(
-            id, itemType.toString(), number, shortName, longName, comment,
-            sortIndex.toString(), quantityMeasure, quantityNumberAfterDecimalPoint.toString(),
-            unitPrice.toFormatted(), salePrice.toFormatted(), discountId, vat, belegReceipt,
-            depositReceipt, status.toString(), bookingBehaviour.toString(), variantText,
-            salePriceChangeable, itemTextChangeable, noteChangeable, rating.toString(),
-            storeLocationId, itemImage, cashOrder
-        ).joinToString(",")
-    }
+
+
+//    override fun toString(): String {
+//        return arrayOf(
+//            id, itemType.toString(), number, shortName, longName, comment,
+//            sortIndex.toString(), quantityMeasure, quantityNumberAfterDecimalPoint.toString(),
+//            unitPrice.toFormatted(), salePrice.toFormatted(), discountId, vat, vat2, belegReceipt,
+//            depositReceipt, status.toString(), bookingBehaviour.toString(), variantText,
+//            salePriceChangeable, itemTextChangeable, noteChangeable, rating.toString(),
+//            storeLocationId, itemImage, cashOrder
+//        ).joinToString(",")
+//    }
 }
 
 data class TargetCategory(
@@ -535,6 +801,7 @@ fun Double.toFormatted(): String {
     numberFormat.currency = currency
     return numberFormat.format(this)
 }
+
 
 fun Double.round(places: Int): Double {
     if (places < 0) throw IllegalArgumentException()
