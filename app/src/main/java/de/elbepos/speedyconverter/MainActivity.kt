@@ -304,43 +304,61 @@ class MainActivity : AppCompatActivity() {
 
     private fun readSpeedyData(): MutableList<Array<String>> {
         try {
+            var steuersatzIndex = 0
+            var steuersatz2Index = 0
             val lines = mutableListOf<Array<String>>(ARTIKEL_HEADER)
             val reader = FileReader(speedyExportFile).buffered()
             val iterator = reader.lineSequence().iterator()
             while (iterator.hasNext()) {
                 val line = iterator.next()
                 val tokens = line.split(";").toMutableList()
-                if (tokens[ARTIKEL_HEADER.indexOf("ArtikelID")] != "ArtikelID") {
-                    val newImhausVat = when (tokens[13]) {
-                        imhausOldValue1.toString() -> imhausNewValue1.toString()
-                        imhausOldValue2.toString() -> imhausNewValue2.toString()
-                        else -> tokens[13]
+                if (tokens[0] == "ArtikelID") {
+                    steuersatzIndex = tokens.indexOf("Steuersatz")
+                    steuersatz2Index = tokens.indexOf("Steuersatz2")
+                } else {
+                    if (steuersatzIndex != -1) {
+                        tokens[steuersatzIndex] = when (tokens[steuersatzIndex]) {
+                            imhausOldValue1.toString() -> imhausNewValue1.toString()
+                            imhausOldValue2.toString() -> imhausNewValue2.toString()
+                            else -> tokens[steuersatzIndex]
+                        }
                     }
-                    val newAusserhausVat = when (tokens[14]) {
-                        ausserhausOldValue1.toString() -> ausserhausNewValue1.toString()
-                        ausserhausOldValue2.toString() -> ausserhausNewValue2.toString()
-                        else -> tokens[14]
+                    if (steuersatz2Index != -1) {
+                        tokens[steuersatz2Index] = when (tokens[steuersatz2Index]) {
+                            ausserhausOldValue1.toString() -> ausserhausNewValue1.toString()
+                            ausserhausOldValue2.toString() -> ausserhausNewValue2.toString()
+                            else -> tokens[steuersatz2Index]
+                        }
                     }
-                    val idIndex = ARTIKEL_HEADER.indexOf("ArtikelID")
-                    val numberIndex = ARTIKEL_HEADER.indexOf("Artikelnummer")
-                    val nameIndex = ARTIKEL_HEADER.indexOf("ArtikelTextKurz")
-                    val categoryIdIndex = ARTIKEL_HEADER.indexOf("ArtikelGruppenID")
-                    val sortIndexIndex = ARTIKEL_HEADER.indexOf("SortierIndex")
-                    val salePriceIndex = ARTIKEL_HEADER.indexOf("Verkaufspreis")
-                    val depositPriceIndex = ARTIKEL_HEADER.indexOf("Pfandpreis")
-                    val linedItem = TargetItem(
-                        id = tokens[idIndex],
-                        number = tokens[numberIndex],
-                        name = tokens[nameIndex],
-                        categoryId = tokens[categoryIdIndex],
-                        sortIndex = tokens[sortIndexIndex].toInt(),
-                        salePrice = formatter!!.format(tokens[salePriceIndex].toDouble() ?: 0.00),
-                        vat = newImhausVat,
-                        vat2 = newAusserhausVat,
-                        depositPrice = formatter!!.format(tokens[depositPriceIndex].toDouble())
-                    ).toLine()
-                    lines.add(linedItem)
+                    lines.add(tokens.toTypedArray())
                 }
+//                if (tokens[ARTIKEL_HEADER.indexOf("ArtikelID")] != "ArtikelID") {
+//                    val steuersatzIndex = ARTIKEL_HEADER.indexOf("Steuersatz")
+//
+//
+//                    val steuersatz2Index = ARTIKEL_HEADER.indexOf("Steuersatz2")
+
+
+//                    val idIndex = ARTIKEL_HEADER.indexOf("ArtikelID")
+//                    val numberIndex = ARTIKEL_HEADER.indexOf("Artikelnummer")
+//                    val nameIndex = ARTIKEL_HEADER.indexOf("ArtikelTextKurz")
+//                    val categoryIdIndex = ARTIKEL_HEADER.indexOf("ArtikelGruppenID")
+//                    val sortIndexIndex = ARTIKEL_HEADER.indexOf("SortierIndex")
+//                    val salePriceIndex = ARTIKEL_HEADER.indexOf("Verkaufspreis")
+//                    val depositPriceIndex = ARTIKEL_HEADER.indexOf("Pfandpreis")
+//                    val linedItem = TargetItem(
+//                        id = tokens[idIndex],
+//                        number = tokens[numberIndex],
+//                        name = tokens[nameIndex],
+//                        categoryId = tokens[categoryIdIndex],
+//                        sortIndex = tokens[sortIndexIndex].toInt(),
+//                        salePrice = formatter!!.format(tokens[salePriceIndex].toDouble() ?: 0.00),
+//                        vat = newImhausVat,
+//                        vat2 = newAusserhausVat,
+//                        depositPrice = formatter!!.format(tokens[depositPriceIndex].toDouble())
+//                    ).toLine()
+
+//                }
             }
             reader.close()
             return lines
